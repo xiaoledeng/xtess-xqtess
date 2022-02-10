@@ -1,0 +1,1175 @@
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+program xtess
+!
+!    Test driver of "tess", the double precision Fortran subroutine to compute
+!    the gravitational potential/acceleration vector/gradient tensor of a tesseroid.
+!
+!    Reference: "Accurate computation of gravitational field of a tesseroid"
+!      authored by T. Fukushima and submitted to J. Geodesy (2017)
+!
+implicit integer (i-n)
+implicit real*8 (a-h,o-z)
+!
+PI=atan(1.d0)*4.d0
+raddeg=PI/180.d0
+delta=1.d-16
+write (*,"(a15,1pe15.7)") "# delta=", delta
+!
+!    A sample tesseroid covering an eastern Himalaya: size 1 deg x 1 deg x 50 km
+!      (Note) Mt. Everest: h = 8.848 km, phi = 27 deg 59 min, lat = 86 deg 55 min
+!
+R0=6380.d0
+HB=-40.d0
+HT=10.d0
+PhiS=27.d0*raddeg
+PhiN=28.d0*raddeg
+FlamW=86.d0*raddeg
+FlamE=87.d0*raddeg
+!
+!	Test evaluation points are along a radial straight line
+!    passing through the geometrical center of the tesseroid
+!
+phi=27.5d0*raddeg
+flam=86.5d0*raddeg
+!
+write (*,"(a15,1p3e15.7)") "# R0,HT,HB=",R0,HT,HB
+write (*,"(a15,1p2e15.7)") "# PhiN,PhiS=",PhiN/raddeg,PhiS/raddeg
+write (*,"(a15,1p2e15.7)") "# LamdaE,LamdaW=",FlamE/raddeg,FlamW/raddeg
+write (*,"(a15,1p2e15.7)") "# phi,lambda=",phi/raddeg,flam/raddeg
+!
+write (*,"(a15,a25)") "# H","V"
+write (*,"(a15,3a25)") "#","gPhi","gLambda","gH"
+write (*,"(a15,3a25)") "#","GammaPhiPhi","GammaPhiLambda","GammaPhiH"
+write (*,"(a15,3a25)") "#","GammaLambdaLambda","GammaLambdaH","GammaHH"
+!
+!    Compute the field along a radial line passing through the tesseroid
+!
+dH=10.d0
+do m=-10,29
+    h=(dble(m)+0.5d0)*dH
+!
+    call tess(PhiN,PhiS,FlamE,FlamW,HT,HB,R0,delta, &
+        phi,flam,h, &
+        v,gPhi,gLam,gH,ggPhiPhi,ggPhiLam,ggPhiH,ggLamLam,ggLamH,ggHH)
+    write (*,"(1pe15.7,1pe25.15)") h,v
+    write (*,"(15x,1p3e25.15)") gPhi,gLam,gH
+    write (*,"(15x,1p3e25.15)") ggPhiPhi,ggPhiLam,ggPhiH
+    write (*,"(15x,1p3e25.15)") ggLamLam,ggLamH,ggHH
+enddo
+!
+stop
+end program xtess
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+subroutine tess(PhiN0,PhiS0,FlamE0,FlamW0,HT0,HB0,R00,delta0,phi,flam,h, &
+    v,gPhi,gLam,gH,ggPhiPhi,ggPhiLam,ggPhiH,ggLamLam,ggLamH,ggHH)
+!
+!    The double precision Fortran subroutine to compute
+!    the gravitational potential, V, the gravitational acceleration vector, g,
+!    and the gravity gradient tensor, Gamma, of a tesseroid.
+!
+!    Input parameters:
+!      PhiN0: Latitude of the north end point of the tesseroid
+!      PhiS0: Latitude of the south end point of the tesseroid, PhiS0 < PhiN0
+!      FlamE0: Longitude of the east end point of the tesseroid
+!      FlamW0: Longitude of the west end point of the tesseroid, FlamW0 < FlamE0
+!      HT0: Height of the top end point of the tesseroid
+!      HB0: Height of the bottom end point of the tesseroid, HB0 < HT0
+!      R00: Radius of the reference spherical surface from which H is counted
+!      delta0: the relative error tolerance (typical value is 1d-9 or 1d-12)
+!    Input variables:
+!      phi: Latitude of the evaluation point
+!      flam: Longitude of the evaluation point
+!      h: Height from the reference sphere of the evaluation point
+!        (Note) We adopted "km" as the unit of h as well as HT0 and HB0.
+!               But any unit is OK if R00 is expressed in the same unit.
+!    Output variables:
+!      v: Normalized gravitational potential at the evaluation point
+!        (Note) normalization constant: V0 = G rho R00^2
+!      gPhi: Latitude component of normalized gravitational acceleration vector
+!      gLam: Longitude component of normalized gravitational acceleration vector
+!      gH: Height component of normalized gravitational acceleration vector
+!        (Note) normalization constant: g0 = G rho R00
+!      ggPhiPhi: Latitude-latitude component of normalized Gamma
+!      ggPhiLam: Latitude-longitude component of normalized Gamma
+!      ggPhiH: Latitude-height component of normalized Gamma
+!      ggLamLam: Longitude-longitude component of normalized Gamma
+!      ggLamH: Longitude-height component of normalized Gamma
+!      ggHH: Height-height component of normalized Gamma
+!        (Note) normalization constant: Gamma0 = G rho
+!
+implicit integer (i-n)
+implicit real*8 (a-h,o-z)
+!
+!    One should declare "vtess" as an external function name
+!
+external vtess
+!
+!    Common blocks for passing the parameters and indirect variables
+!
+real*8 eps
+common /epsV/eps
+real*8 R0,HT,HB,PhiN,PhiS,FlamE,FlamW,beta
+common /paramV/R0,HT,HB,PhiN,PhiS,FlamE,FlamW,beta
+real*8 delta,delta1,delta2,d1phi,d1lam,d1h,d2phi,d2lam,d2h
+common /deltaV/delta,delta1,delta2,d1phi,d1lam,d1h,d2phi,d2lam,d2h
+!
+!    Store the input variables into common blocks
+!    so that the subprograms can refer them indirectly
+!
+PhiN=PhiN0
+PhiS=PhiS0
+FlamE=FlamE0
+FlamW=FlamW0
+HT=HT0
+HB=HB0
+R0=R00
+!
+!    Calculate parameters of numerical integration and differentiation
+!
+eps=delta0
+delta=delta0
+delta1=delta**(1.d0/3.d0)
+delta2=sqrt(sqrt(delta))
+!
+!    Compute tesseroid-dependent constants beforehand
+!
+deltaH=HT-HB
+deltaPhi=PhiN-PhiS
+deltaFlam=FlamE-FlamW
+beta=deltaH/R0
+RC=R0+(HT+HB)*0.5d0
+PhiC=(PhiN+PhiS)*0.5d0
+FlamC=(FlamE+FlamW)*0.5d0
+sinPhiC=sin(PhiC)
+cosPhiC=cos(PhiC)
+!
+!    Compute evaluation-point-dependent constants beforehand
+!
+r=R0+h
+sinphi=sin(phi)
+cosphi=cos(phi)
+cosdlam=cos(flam-FlamC)
+scale0=0.5d0*sqrt(deltaH*deltaH+RC*RC*(deltaPhi*deltaPhi &
+    +cosPhiC*cosPhiC*deltaFlam*deltaFlam))
+scale1=sqrt(r*r+RC*RC-2.d0*RC*r*(sinphi*sinPhiC+cosphi*cosPhiC*cosdlam))
+scale=max(scale0,scale1)
+d1h=scale*delta1
+d2h=scale*delta2
+!
+!    Compute the gravitational potential by numerical integration
+!
+v=vtess(phi,flam,h)
+!
+!    Compute the gravitational acceleration vector by numerical differentiation
+!
+call gtess(vtess,phi,flam,h,v,gPhi,gLam,gH)
+!
+!    Compute the gravity gradient tensor by numerical differentiation
+!
+call ggtess(vtess,phi,flam,h,v,gPhi,gLam,gH, &
+    ggPhiPhi,ggPhiLam,ggPhiH,ggLamLam,ggLamH,ggHH)
+!
+return;end
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+real*8 function vtess(phi,flam,h)
+!
+!    The double precision Fortran function to compute
+!    the gravitational potential by the conditional split quadrature method
+!
+implicit integer (i-n)
+implicit real*8 (a-h,o-z)
+!
+!    One should declare "stess" as an external function name
+!
+external stess
+!
+!    Common blocks for passing the parameters and indirect variables
+!
+real*8 eps
+common /epsV/eps
+real*8 R0,HT,HB,PhiN,PhiS,FlamE,FlamW,beta
+common /paramV/R0,HT,HB,PhiN,PhiS,FlamE,FlamW,beta
+real*8 phi0,flam0,h0,xiN,xiS,etaE,etaW
+common /argV/phi0,flam0,h0,xiN,xiS,etaE,etaW
+real*8 alpha,gamma,zetaT,zetaB,sigma,fmu
+common /paramV2/alpha,gamma,zetaT,zetaB,sigma,fmu
+!
+!    Store the input variables into common blocks
+!    so that the subprograms can refer them indirectly
+!
+phi0=phi
+flam0=flam
+h0=h
+!
+!    Compute tesseroid-dependent constants beforehand
+!
+xiN=PhiN-phi
+xiS=PhiS-phi
+etaE=FlamE-flam
+etaW=FlamW-flam
+!
+!    Compute evaluation-point-dependent constants beforehand
+!
+alpha=1.d0+h/R0
+gamma=cos(phi)
+zetaB=(HB-h)/R0
+zetaT=zetaB+beta
+!
+!    Conditional split quadrature of latitude line integration 
+!
+if(xiS.lt.0.d0.and.xiN.gt.0.d0) then
+    call dqde(stess,xiS,0.d0,eps,v1)
+    call dqde(stess,0.d0,xiN,eps,v2)
+    v=v1+v2
+else
+    call dqde(stess,xiS,xiN,eps,v)
+endif
+vtess=v
+!
+return; end
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+real*8 function stess(xi)
+!
+!    The double precision Fortran function to compute
+!    the latitude line integral requried in "vtess"
+!
+implicit integer (i-n)
+implicit real*8 (a-h,o-z)
+!
+!    One should declare "vkern" as an external function name
+!
+external vkern
+!
+!    Common blocks for passing the parameters and indirect variables
+!
+real*8 eps
+common /epsV/eps
+real*8 phi0,flam0,h0,xiN,xiS,etaE,etaW
+common /argV/phi0,flam0,h0,xiN,xiS,etaE,etaW
+real*8 alpha,gamma,zetaT,zetaB,sigma,fmu
+common /paramV2/alpha,gamma,zetaT,zetaB,sigma,fmu
+!
+!    Compute latitude-dependent constants beforehand
+!
+sigma=cos(phi0+xi)
+fmu=sin(xi*0.5d0)
+!
+!    Conditional split quadrature of longitude line integration 
+!
+if(etaW.lt.0.d0.and.etaE.gt.0.d0) then
+    call dqde1(vkern,etaW,0.d0,eps,s1)
+    call dqde1(vkern,0.d0,etaE,eps,s2)
+    s=s1+s2
+else
+    call dqde1(vkern,etaW,etaE,eps,s)
+endif
+stess=s
+!
+return; end
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+real*8 function vkern(eta)
+!
+!    The double precision Fortran function to compute
+!    the kernel function expressed in a cancellation-free form
+!
+implicit integer (i-n)
+implicit real*8 (a-h,o-z)
+!
+!    Common blocks for passing the parameters and indirect variables
+!
+real*8 R0,HT,HB,PhiN,PhiS,FlamE,FlamW,beta
+common /paramV/R0,HT,HB,PhiN,PhiS,FlamE,FlamW,beta
+real*8 alpha,gamma,zetaT,zetaB,sigma,fmu
+common /paramV2/alpha,gamma,zetaT,zetaB,sigma,fmu
+!
+!    Cancellation-free computation of the kernel function
+!
+fnu=sin(eta*0.5d0)
+B=2.d0*alpha*(fmu*fmu+gamma*sigma*fnu*fnu)
+A=B*(2.d0*alpha-B)
+C=(alpha-B)*(alpha-B)-A*0.5d0
+D=0.5d0*(zetaT+4.d0*alpha-3.d0*B)
+ST=sqrt(A+(B+zetaT)*(B+zetaT))
+SB=sqrt(A+(B+zetaB)*(B+zetaB))
+T=(zetaT+zetaB+2.d0*B)/(ST+SB)
+if(zetaB+B.lt.0.d0) then
+    fl=dlog1p((1.d0+T)*beta*(-zetaB-B+SB)/A)
+else
+    fl=dlog1p((1.d0+T)*beta/(zetaB+B+SB))
+endif
+vkern=sigma*(C*fl+beta*(D*T+SB*0.5d0))
+!
+return; end
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+subroutine gtess(vtess,phi,flam,h,v,gPhi,gLam,gH)
+!
+!    Compute the gravitational acceleration vector by the conditional switch
+!    of the central and single-sided second order finite difference formulas
+!
+implicit integer (i-n)
+implicit real*8 (a-h,o-z)
+!
+!    Common blocks for passing the parameters and indirect variables
+!
+real*8 R0,HT,HB,PhiN,PhiS,FlamE,FlamW,beta
+common /paramV/R0,HT,HB,PhiN,PhiS,FlamE,FlamW,beta
+real*8 delta,delta1,delta2,d1phi,d1lam,d1h,d2phi,d2lam,d2h
+common /deltaV/delta,delta1,delta2,d1phi,d1lam,d1h,d2phi,d2lam,d2h
+!
+!	Compute gPhi
+!
+if((flam.ge.FlamW.and.flam.le.FlamE).and.(h.ge.HB.and.h.le.HT)) then
+    if((phi.gt.PhiS.and.phi-d1phi.lt.PhiS) &
+        .or.(phi.gt.PhiN.and.phi-d1phi.lt.PhiN)) then
+        gPhi=(-vtess(phi+2.d0*d1phi,flam,h) &
+            +4.d0*vtess(phi+d1phi,flam,h) &
+            -3.d0*v)/(2.d0*d1h)
+    elseif((phi.lt.PhiS.and.phi+d1phi.gt.PhiS) &
+        .or.(phi.lt.PhiN.and.phi+d1phi.gt.PhiN)) then
+        gPhi=(vtess(phi-2.d0*d1phi,flam,h) &
+            -4.d0*vtess(phi-d1phi,flam,h) &
+            +3.d0*v)/(2.d0*d1h)
+    else
+        gPhi=(vtess(phi+d1phi,flam,h) &
+            -vtess(phi-d1phi,flam,h))/(2.d0*d1h)
+    endif
+else
+    gPhi=(vtess(phi+d1phi,flam,h) &
+        -vtess(phi-d1phi,flam,h))/(2.d0*d1h)
+endif
+!
+!	Compute gLam
+!
+if((phi.ge.PhiS.and.phi.le.PhiN).and.(h.ge.HB.and.h.le.HT)) then
+    if((flam.gt.FlamW.and.flam-d1lam.lt.FlamW) &
+        .or.(flam.gt.FlamE.and.flam-d1lam.lt.FlamE)) then
+        gLam=(-vtess(phi,flam+2.d0*d1lam,h) &
+            +4.d0*vtess(phi,flam+d1lam,h) &
+            -3.d0*v)/(2.d0*d1h)
+    elseif((flam.lt.FlamW.and.flam+d1lam.gt.FlamW) &
+        .or.(flam.lt.FlamE.and.flam+d1lam.gt.FlamE)) then
+        gLam=(vtess(phi,flam-2.d0*d1lam,h) &
+            -4.d0*vtess(phi,flam-d1lam,h) &
+            +3.d0*v)/(2.d0*d1h)
+    else
+        gLam=(vtess(phi,flam+d1lam,h) &
+            -vtess(phi,flam-d1lam,h))/(2.d0*d1h)
+    endif
+else
+    gLam=(vtess(phi,flam+d1lam,h) &
+        -vtess(phi,flam-d1lam,h))/(2.d0*d1h)
+endif
+!
+!	Compute gH
+!
+if((phi.ge.PhiS.and.phi.le.PhiN).and.(flam.ge.FlamW.and.flam.le.FlamE)) then
+    if((h.gt.HB.and.h-d1h.lt.HB).or.(h.gt.HT.and.h-d1h.lt.HT)) then
+        gH=(-vtess(phi,flam,h+2.d0*d1h)+4.d0*vtess(phi,flam,h+d1h) &
+            -3.d0*v)/(2.d0*d1h)
+    elseif((h.lt.HB.and.h+d1h.gt.HB).or.(h.lt.HT.and.h+d1h.gt.HT)) then
+        gH=(vtess(phi,flam,h-2.d0*d1h)-4.d0*vtess(phi,flam,h-d1h) &
+            +3.d0*v)/(2.d0*d1h)
+    else
+        gH=(vtess(phi,flam,h+d1h)-vtess(phi,flam,h-d1h))/(2.d0*d1h)
+    endif
+else
+    gH=(vtess(phi,flam,h+d1h)-vtess(phi,flam,h-d1h))/(2.d0*d1h)
+endif
+!
+return; end
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+subroutine ggtess(vtess,phi,flam,h,v,gPhi,gLam,gH, &
+    ggPhiPhi,ggPhiLam,ggPhiH,ggLamLam,ggLamH,ggHH)
+!
+!    Compute the gravity gradient tensor by the conditional switch
+!    of the central and single-sided second order finite difference formulas
+!
+implicit integer (i-n)
+implicit real*8 (a-h,o-z)
+!
+!    Common blocks for passing the parameters and indirect variables
+!
+real*8 R0,HT,HB,PhiN,PhiS,FlamE,FlamW,beta
+common /paramV/R0,HT,HB,PhiN,PhiS,FlamE,FlamW,beta
+real*8 delta,delta1,delta2,d1phi,d1lam,d1h,d2phi,d2lam,d2h
+common /deltaV/delta,delta1,delta2,d1phi,d1lam,d1h,d2phi,d2lam,d2h
+!
+!    Compute conmponent-independent variables beorehand
+!
+r=R0+h
+c=cos(phi)
+t=tan(phi)
+!
+!	Compute ggPhiPhi
+!
+if((flam.ge.FlamW.and.flam.le.FlamE).and.(h.ge.HB.and.h.le.HT)) then
+    if((phi.gt.PhiS.and.phi-d2phi.lt.PhiS) &
+        .or.(phi.gt.PhiN.and.phi-d2phi.lt.PhiN)) then
+        ggPhiPhi=(-vtess(phi+3.d0*d2phi,flam,h) &
+            +4.d0*vtess(phi+2.d0*d2phi,flam,h) &
+            -5.d0*vtess(phi+d2phi,flam,h) &
+            +2.d0*v)/(d2h*d2h)
+    elseif((phi.lt.PhiS.and.phi+d2phi.gt.PhiS) &
+        .or.(phi.lt.PhiN.and.phi+d2phi.gt.PhiN)) then
+        ggPhiPhi=(-vtess(phi-3.d0*d2phi,flam,h) &
+            +4.d0*vtess(phi-2.d0*d2phi,flam,h) &
+            -5.d0*vtess(phi-d2phi,flam,h) &
+            +2.d0*v)/(d2h*d2h)
+    else
+        ggPhiPhi=(vtess(phi+d2phi,flam,h)-2.d0*v &
+            +vtess(phi-d2phi,flam,h))/(d2h*d2h)
+    endif
+else
+    ggPhiPhi=(vtess(phi+d2phi,flam,h)-2.d0*v &
+        +vtess(phi-d2phi,flam,h))/(d2h*d2h)
+endif
+ggPhiPhi=ggPhiPhi+gH/r
+!
+!	Compute ggLamLam
+!
+if((phi.ge.PhiS.and.phi.le.PhiN).and.(h.ge.HB.and.h.le.HT)) then
+    if((flam.gt.FlamW.and.flam-d2lam.lt.FlamW) &
+        .or.(flam.gt.FlamE.and.flam-d2lam.lt.FlamE)) then
+        ggLamLam=(-vtess(phi,flam+3.d0*d2lam,h) &
+            +4.d0*vtess(phi,flam+2.d0*d2lam,h) &
+            -5.d0*vtess(phi,flam+d2lam,h) &
+            +2.d0*v)/(d2h*d2h)
+    elseif((flam.lt.FlamW.and.flam+d2lam.gt.FlamW) &
+        .or.(flam.lt.FlamE.and.flam+d2lam.gt.FlamE)) then
+        ggLamLam=(-vtess(phi,flam-3.d0*d2lam,h) &
+            +4.d0*vtess(phi,flam-2.d0*d2lam,h) &
+            -5.d0*vtess(phi,flam-d2lam,h) &
+            +2.d0*v)/(d2h*d2h)
+    else
+        ggLamLam=(vtess(phi,flam+d2lam,h)-2.d0*v &
+            +vtess(phi,flam-d2lam,h))/(d2h*d2h)
+    endif
+else
+    ggLamLam=(vtess(phi,flam+d2lam,h)-2.d0*v &
+        +vtess(phi,flam-d2lam,h))/(d2h*d2h)
+endif
+ggLamLam=ggLamLam+(gH-gPhi*t)/r
+!
+!	Compute ggHH
+!
+if((phi.ge.PhiS.and.phi.le.PhiN).and.(flam.ge.FlamW.and.flam.le.FlamE)) then
+    if((h.gt.HB.and.h-d2h.lt.HB).or.(h.gt.HT.and.h-d2h.lt.HT)) then
+        ggHH=(-vtess(phi,flam,h+3.d0*d2h)+4.d0*vtess(phi,flam,h+2.d0*d2h) &
+            -5.d0*vtess(phi,flam,h+d2h)+2.d0*v)/(d2h*d2h)
+    elseif((h.lt.HB.and.h+d1h.gt.HB).or.(h.lt.HT.and.h+d1h.gt.HT)) then
+        ggHH=(-vtess(phi,flam,h+3.d0*d2h)+4.d0*vtess(phi,flam,h+2.d0*d2h) &
+            -5.d0*vtess(phi,flam,h+d2h)+2.d0*v)/(d2h*d2h)
+    else
+        ggHH=(vtess(phi,flam,h+d2h)-2.d0*v+vtess(phi,flam,h-d2h))/(d2h*d2h)
+    endif
+else
+    ggHH=(vtess(phi,flam,h+d2h)-2.d0*v+vtess(phi,flam,h-d2h))/(d2h*d2h)
+endif
+!
+!	Compute ggPhiLam
+!
+if(h.ge.HB.and.h.le.HT) then
+    if(((phi.gt.PhiS.and.phi-d2phi.lt.PhiS) &
+        .or.(phi.gt.PhiN.and.phi-d2phi.lt.PhiN)) &
+        .and.((flam.gt.FlamW.and.flam-d2lam.lt.FlamW) &
+        .or.(flam.gt.FlamE.and.flam-d2lam.lt.FlamE))) then
+        ggPhiLam=(vtess(phi+2.d0*d2phi,flam+2.d0*d2lam,h) &
+            -4.d0*vtess(phi+2.d0*d2phi,flam+d2lam,h) &
+            +3.d0*vtess(phi+2.d0*d2phi,flam,h) &
+            -4.d0*vtess(phi+d2phi,flam+2.d0*d2lam,h) &
+            +16.d0*vtess(phi+d2phi,flam+d2lam,h) &
+            -12.d0*vtess(phi+d2phi,flam,h) &
+            +3.d0*vtess(phi,flam+2.d0*d2lam,h) &
+            -12.d0*vtess(phi,flam+d2lam,h) &
+            +9.d0*v)/(4.d0*d2h*d2h)
+    elseif(((phi.gt.PhiS.and.phi-d2phi.lt.PhiS) &
+        .or.(phi.gt.PhiN.and.phi-d2phi.lt.PhiN)) &
+        .and.((flam.lt.FlamW.and.flam+d2lam.gt.FlamW) &
+        .or.(flam.lt.FlamE.and.flam+d2lam.gt.FlamE))) then
+        ggPhiLam=-(vtess(phi+2.d0*d2phi,flam-2.d0*d2lam,h) &
+            -4.d0*vtess(phi+2.d0*d2phi,flam-d2lam,h) &
+            +3.d0*vtess(phi+2.d0*d2phi,flam,h) &
+            -4.d0*vtess(phi+d2phi,flam-2.d0*d2lam,h) &
+            +16.d0*vtess(phi+d2phi,flam-d2lam,h) &
+            -12.d0*vtess(phi+d2phi,flam,h) &
+            +3.d0*vtess(phi,flam-2.d0*d2lam,h) &
+            -12.d0*vtess(phi,flam-d2lam,h) &
+            +9.d0*v)/(4.d0*d2h*d2h)
+    elseif(((phi.lt.PhiS.and.phi+d2phi.gt.PhiS) &
+        .or.(phi.lt.PhiN.and.phi+d2phi.gt.PhiN)) &
+        .and.((flam.gt.FlamW.and.flam-d2lam.lt.FlamW) &
+        .or.(flam.gt.FlamE.and.flam-d2lam.lt.FlamE))) then
+        ggPhiLam=-(vtess(phi-2.d0*d2phi,flam+2.d0*d2lam,h) &
+            -4.d0*vtess(phi-2.d0*d2phi,flam+d2lam,h) &
+            +3.d0*vtess(phi-2.d0*d2phi,flam,h) &
+            -4.d0*vtess(phi-d2phi,flam+2.d0*d2lam,h) &
+            +16.d0*vtess(phi-d2phi,flam+d2lam,h) &
+            -12.d0*vtess(phi-d2phi,flam,h) &
+            +3.d0*vtess(phi,flam+2.d0*d2lam,h) &
+            -12.d0*vtess(phi,flam+d2lam,h) &
+            +9.d0*v)/(4.d0*d2h*d2h)
+    elseif(((phi.lt.PhiS.and.phi+d2phi.gt.PhiS) &
+        .or.(phi.lt.PhiN.and.phi+d2phi.gt.PhiN)) &
+        .and.((flam.gt.FlamW.and.flam+d2lam.lt.FlamW) &
+        .or.(flam.gt.FlamE.and.flam+d2lam.lt.FlamE))) then
+        ggPhiLam=(vtess(phi-2.d0*d2phi,flam-2.d0*d2lam,h) &
+            -4.d0*vtess(phi-2.d0*d2phi,flam-d2lam,h) &
+            +3.d0*vtess(phi-2.d0*d2phi,flam,h) &
+            -4.d0*vtess(phi-d2phi,flam-2.d0*d2lam,h) &
+            +16.d0*vtess(phi-d2phi,flam-d2lam,h) &
+            -12.d0*vtess(phi-d2phi,flam,h) &
+            +3.d0*vtess(phi,flam-2.d0*d2lam,h) &
+            -12.d0*vtess(phi,flam-d2lam,h) &
+            +9.d0*v)/(4.d0*d2h*d2h)
+    elseif(((phi.gt.PhiS.and.phi-d2phi.lt.PhiS) &
+        .or.(phi.gt.PhiN.and.phi-d2phi.lt.PhiN)) &
+        .and.((flam+d2lam.lt.FlamW).or.(flam-d2lam.gt.FlamE) &
+        .or.(flam-d2lam.gt.FlamW.and.flam+d2lam.lt.FlamE))) then
+        ggPhiLam=(-vtess(phi+2.d0*d2phi,flam+d2lam,h) &
+            +vtess(phi+2.d0*d2phi,flam-d2lam,h) &
+            +4.d0*vtess(phi+d2phi,flam+d2lam,h) &
+            -4.d0*vtess(phi+d2phi,flam-d2lam,h) &
+            -3.d0*vtess(phi,flam+d2lam,h) &
+            +3.d0*vtess(phi,flam-d2lam,h))/(4.d0*d2h*d2h)
+    elseif(((phi.lt.PhiS.and.phi+d2phi.gt.PhiS) &
+        .or.(phi.lt.PhiN.and.phi+d2phi.gt.PhiN)) &
+        .and.((flam+d2lam.lt.FlamW).or.(flam-d2lam.gt.FlamE) &
+        .or.(flam-d2lam.gt.FlamW.and.flam+d2lam.lt.FlamE))) then
+        ggPhiLam=(vtess(phi-2.d0*d2phi,flam+d2lam,h) &
+            -vtess(phi-2.d0*d2phi,flam-d2lam,h) &
+            -4.d0*vtess(phi-d2phi,flam+d2lam,h) &
+            +4.d0*vtess(phi-d2phi,flam-d2lam,h) &
+            +3.d0*vtess(phi,flam+d2lam,h) &
+            -3.d0*vtess(phi,flam-d2lam,h))/(4.d0*d2h*d2h)
+    elseif(((flam.gt.FlamW.and.flam-d2lam.lt.FlamW) &
+        .or.(flam.gt.FlamE.and.flam-d2lam.lt.FlamE)) &
+        .and.((phi+d2phi.lt.PhiS).or.(phi-d2phi.gt.PhiN) &
+        .or.(phi-d2phi.gt.PhiS.and.phi+d2phi.lt.PhiN))) then
+        ggPhiLam=(-vtess(phi-2.d0*d2phi,flam+d2lam,h) &
+            +vtess(phi-2.d0*d2phi,flam-d2lam,h) &
+            +4.d0*vtess(phi-d2phi,flam+d2lam,h) &
+            -4.d0*vtess(phi-d2phi,flam-d2lam,h) &
+            -3.d0*vtess(phi,flam+d2lam,h) &
+            +3.d0*vtess(phi,flam-d2lam,h))/(4.d0*d2h*d2h)
+    elseif(((flam.lt.FlamW.and.flam+d2lam.gt.FlamW) &
+        .or.(flam.lt.FlamE.and.flam+d2lam.gt.FlamE)) &
+        .and.((phi+d2phi.lt.PhiS).or.(phi-d2phi.gt.PhiN) &
+        .or.(phi-d2phi.gt.PhiS.and.phi+d2phi.lt.PhiN))) then
+        ggPhiLam=(-vtess(phi-2.d0*d2phi,flam+d2lam,h) &
+            +vtess(phi-2.d0*d2phi,flam-d2lam,h) &
+            +4.d0*vtess(phi-d2phi,flam+d2lam,h) &
+            -4.d0*vtess(phi-d2phi,flam-d2lam,h) &
+            -3.d0*vtess(phi,flam+d2lam,h) &
+            +3.d0*vtess(phi,flam-d2lam,h))/(4.d0*d2h*d2h)
+    else
+        ggPhiLam=(vtess(phi+d2phi,flam+d2lam,h) &
+            -vtess(phi-d2phi,flam+d2lam,h) &
+            -vtess(phi+d2phi,flam-d2lam,h) &
+            +vtess(phi-d2phi,flam-d2lam,h))/(4.d0*d2h*d2h)
+    endif
+else
+    ggPhiLam=(vtess(phi+d2phi,flam+d2lam,h) &
+        -vtess(phi-d2phi,flam+d2lam,h) &
+        -vtess(phi+d2phi,flam-d2lam,h) &
+        +vtess(phi-d2phi,flam-d2lam,h))/(4.d0*d2h*d2h)
+endif
+ggPhiLam=ggPhiLam+gPhi*t/(r*c)
+!
+!	Compute ggPhiH
+!
+if(flam.ge.FlamW.and.flam.le.FlamE) then
+    if(((phi.ge.PhiS.and.phi-d2phi.lt.PhiS) &
+        .or.(phi.ge.PhiN.and.phi-d2phi.lt.PhiN)) &
+        .and.((h.ge.HB.and.h-d2h.lt.HB) &
+        .or.(h.ge.HT.and.h-d2h.lt.HT))) then
+        ggPhiH=(vtess(phi+2.d0*d2phi,flam,h+2.d0*d2h) &
+            -4.d0*vtess(phi+2.d0*d2phi,flam,h+d2h) &
+            +3.d0*vtess(phi+2.d0*d2phi,flam,h) &
+            -4.d0*vtess(phi+d2phi,flam,h+2.d0*d2h) &
+            +16.d0*vtess(phi+d2phi,flam,h+d2h) &
+            -12.d0*vtess(phi+d2phi,flam,h) &
+            +3.d0*vtess(phi,flam,h+2.d0*d2h) &
+            -12.d0*vtess(phi,flam,h+d2h) &
+            +9.d0*v)/(4.d0*d2h*d2h)
+    elseif(((phi.ge.PhiS.and.phi-d2phi.lt.PhiS) &
+        .or.(phi.ge.PhiN.and.phi-d2phi.lt.PhiN)) &
+        .and.((h.le.HB.and.h+d2h.gt.HB) &
+        .or.(h.le.HT.and.h+d2h.gt.HT))) then
+        ggPhiH=-(vtess(phi+2.d0*d2phi,flam,h-2.d0*d2h) &
+            -4.d0*vtess(phi+2.d0*d2phi,flam,h-d2h) &
+            +3.d0*vtess(phi+2.d0*d2phi,flam,h) &
+            -4.d0*vtess(phi+d2phi,flam,h-2.d0*d2h) &
+            +16.d0*vtess(phi+d2phi,flam,h-d2h) &
+            -12.d0*vtess(phi+d2phi,flam,h) &
+            +3.d0*vtess(phi,flam,h-2.d0*d2h) &
+            -12.d0*vtess(phi,flam,h-d2h) &
+            +9.d0*v)/(4.d0*d2h*d2h)
+    elseif(((phi.le.PhiS.and.phi+d2phi.lt.PhiS) &
+        .or.(phi.le.PhiN.and.phi+d2phi.lt.PhiN)) &
+        .and.((h.ge.HB.and.h-d2h.lt.HB) &
+        .or.(h.ge.HT.and.h-d2h.lt.HT))) then
+        ggPhiH=-(vtess(phi-2.d0*d2phi,flam,h+2.d0*d2h) &
+            -4.d0*vtess(phi-2.d0*d2phi,flam,h+d2h) &
+            +3.d0*vtess(phi-2.d0*d2phi,flam,h) &
+            -4.d0*vtess(phi-d2phi,flam,h+2.d0*d2h) &
+            +16.d0*vtess(phi-d2phi,flam,h+d2h) &
+            -12.d0*vtess(phi-d2phi,flam,h) &
+            +3.d0*vtess(phi,flam,h+2.d0*d2h) &
+            -12.d0*vtess(phi,flam,h+d2h) &
+            +9.d0*v)/(4.d0*d2h*d2h)
+    elseif(((phi.le.PhiS.and.phi+d2phi.lt.PhiS) &
+        .or.(phi.le.PhiN.and.phi+d2phi.lt.PhiN)) &
+        .and.((h.le.HB.and.h+d2h.gt.HB) &
+        .or.(h.le.HT.and.h+d2h.gt.HT))) then
+        ggPhiH=(vtess(phi+2.d0*d2phi,flam,h+2.d0*d2h) &
+            -4.d0*vtess(phi+2.d0*d2phi,flam,h+d2h) &
+            +3.d0*vtess(phi+2.d0*d2phi,flam,h) &
+            -4.d0*vtess(phi+d2phi,flam,h+2.d0*d2h) &
+            +16.d0*vtess(phi+d2phi,flam,h+d2h) &
+            -12.d0*vtess(phi+d2phi,flam,h) &
+            +3.d0*vtess(phi,flam,h+2.d0*d2h) &
+            -12.d0*vtess(phi,flam,h+d2h) &
+            +9.d0*v)/(4.d0*d2h*d2h)
+    elseif(((phi.ge.PhiS.and.phi-d2phi.lt.PhiS) &
+        .or.(phi.ge.PhiN.and.phi-d2phi.lt.PhiN)) &
+        .and.((h+d2h.lt.HB).or.(h-d2h.gt.HT) &
+        .or.(h-d2h.gt.HB.and.h+d2h.lt.HT))) then
+        ggPhiH=(-vtess(phi+2.d0*d2phi,flam,h+d2h) &
+            +vtess(phi+2.d0*d2phi,flam,h-d2h) &
+            +4.d0*vtess(phi+d2phi,flam,h+d2h) &
+            -4.d0*vtess(phi+d2phi,flam,h-d2h) &
+            -3.d0*vtess(phi,flam,h+d2h) &
+            +3.d0*vtess(phi,flam,h-d2h))/(4.d0*d2h*d2h)
+    elseif(((phi.le.PhiS.and.phi+d2phi.gt.PhiS) &
+        .or.(phi.le.PhiN.and.phi+d2phi.gt.PhiN)) &
+        .and.((h+d2h.lt.HB).or.(h-d2h.gt.HT) &
+        .or.(h-d2h.gt.HB.and.h+d2h.lt.HT))) then
+        ggPhiH=-(-vtess(phi-2.d0*d2phi,flam,h+d2h) &
+            +vtess(phi-2.d0*d2phi,flam,h-d2h) &
+            +4.d0*vtess(phi-d2phi,flam,h+d2h) &
+            -4.d0*vtess(phi-d2phi,flam,h-d2h) &
+            -3.d0*vtess(phi,flam,h+d2h) &
+            +3.d0*vtess(phi,flam,h-d2h))/(4.d0*d2h*d2h)
+    elseif(((h.ge.HB.and.h-d2h.lt.HB) &
+        .or.(h.ge.HT.and.h-d2h.lt.HT)) &
+        .and.((phi+d2phi.lt.PhiS).or.(phi-d2phi.gt.PhiN) &
+        .or.(phi-d2phi.gt.PhiS.and.phi+d2phi.lt.PhiN))) then
+        ggPhiH=(-vtess(phi+d2phi,flam,h+2.d0*d2h) &
+            +vtess(phi-d2phi,flam,h+2.d0*d2h) &
+            +4.d0*vtess(phi+d2phi,flam,h+d2h) &
+            -4.d0*vtess(phi-d2phi,flam,h+d2h) &
+            -3.d0*vtess(phi+d2phi,flam,h) &
+            +3.d0*vtess(phi-d2phi,flam,h))/(4.d0*d2h*d2h)
+    elseif(((h.le.HB.and.h+d2h.gt.HB) &
+        .or.(h.le.HT.and.h+d2h.gt.HT)) &
+        .and.((phi+d2phi.lt.PhiS).or.(phi-d2phi.gt.PhiN) &
+        .or.(phi-d2phi.gt.PhiS.and.phi+d2phi.lt.PhiN))) then
+        ggPhiH=-(-vtess(phi+d2phi,flam,h-2.d0*d2h) &
+            +vtess(phi-d2phi,flam,h-2.d0*d2h) &
+            +4.d0*vtess(phi+d2phi,flam,h-d2h) &
+            -4.d0*vtess(phi-d2phi,flam,h-d2h) &
+            -3.d0*vtess(phi+d2phi,flam,h) &
+            +3.d0*vtess(phi-d2phi,flam,h))/(4.d0*d2h*d2h)
+    else
+        ggPhiH=(vtess(phi+d2phi,flam,h+d2h) &
+            -vtess(phi-d2phi,flam,h+d2h) &
+            -vtess(phi+d2phi,flam,h-d2h) &
+            +vtess(phi-d2phi,flam,h-d2h))/(4.d0*d2h*d2h)
+    endif
+else
+    ggPhiH=(vtess(phi+d2phi,flam,h+d2h) &
+        -vtess(phi-d2phi,flam,h+d2h) &
+        -vtess(phi+d2phi,flam,h-d2h) &
+        +vtess(phi-d2phi,flam,h-d2h))/(4.d0*d2h*d2h)
+endif
+ggPhiH=ggPhiH-gPhi/r
+!
+!	Compute ggLamH
+!
+if(phi.ge.PhiS.and.phi.le.PhiN) then
+    if(((flam.ge.FlamW.and.flam-d2flam.lt.FlamW) &
+        .or.(flam.ge.FlamE.and.flam-d2flam.lt.FlamE)) &
+        .and.((h.ge.HB.and.h-d2h.lt.HB) &
+        .or.(h.ge.HT.and.h-d2h.lt.HT))) then
+        ggLamH=(vtess(phi,flam+2.d0*d2lam,h+2.d0*d2h) &
+            -4.d0*vtess(phi,flam+2.d0*d2lam,h+d2h) &
+            +3.d0*vtess(phi,flam+2.d0*d2lam,h) &
+            -4.d0*vtess(phi,flam+d2lam,h+2.d0*d2h) &
+            +16.d0*vtess(phi,flam+d2lam,h+d2h) &
+            -12.d0*vtess(phi,flam+d2lam,h) &
+            +3.d0*vtess(phi,flam,h+2.d0*d2h) &
+            -12.d0*vtess(phi,flam,h+d2h) &
+            +9.d0*v)/(4.d0*d2h*d2h)
+    elseif(((flam.ge.FlamW.and.flam-d2lam.lt.FlamW) &
+        .or.(flam.ge.FlamE.and.flam-d2lam.lt.FlamE)) &
+        .and.((h.le.HB.and.h+d2h.gt.HB) &
+        .or.(h.le.HT.and.h+d2h.gt.HT))) then
+        ggLamH=-(vtess(phi,flam+2.d0*d2lam,h-2.d0*d2h) &
+            -4.d0*vtess(phi,flam+2.d0*d2lam,h-d2h) &
+            +3.d0*vtess(phi,flam+2.d0*d2lam,h) &
+            -4.d0*vtess(phi,flam+d2lam,h-2.d0*d2h) &
+            +16.d0*vtess(phi,flam+d2lam,h-d2h) &
+            -12.d0*vtess(phi,flam+d2lam,h) &
+            +3.d0*vtess(phi,flam,h-2.d0*d2h) &
+            -12.d0*vtess(phi,flam,h-d2h) &
+            +9.d0*v)/(4.d0*d2h*d2h)
+    elseif(((flam.le.FlamW.and.flam+d2lam.lt.FlamW) &
+        .or.(flam.le.FlamE.and.flam+d2lam.lt.FlamE)) &
+        .and.((h.ge.HB.and.h-d2h.lt.HB) &
+        .or.(h.ge.HT.and.h-d2h.lt.HT))) then
+        ggLamH=-(vtess(phi,flam-2.d0*d2lam,h+2.d0*d2h) &
+            -4.d0*vtess(phi,flam-2.d0*d2lam,h+d2h) &
+            +3.d0*vtess(phi,flam-2.d0*d2lam,h) &
+            -4.d0*vtess(phi,flam-d2lam,h+2.d0*d2h) &
+            +16.d0*vtess(phi,flam-d2lam,h+d2h) &
+            -12.d0*vtess(phi,flam-d2lam,h) &
+            +3.d0*vtess(phi,flam,h+2.d0*d2h) &
+            -12.d0*vtess(phi,flam,h+d2h) &
+            +9.d0*v)/(4.d0*d2h*d2h)
+    elseif(((flam.le.FlamW.and.flam+d2lam.lt.FlamW) &
+        .or.(flam.le.FlamE.and.flam+d2lam.lt.FlamE)) &
+        .and.((h.le.HB.and.h+d2h.gt.HB) &
+        .or.(h.le.HT.and.h+d2h.gt.HT))) then
+        ggLamH=(vtess(phi,flam-2.d0*d2lam,h-2.d0*d2h) &
+            -4.d0*vtess(phi,flam-2.d0*d2lam,h-d2h) &
+            +3.d0*vtess(phi,flam-2.d0*d2lam,h) &
+            -4.d0*vtess(phi,flam-d2lam,h-2.d0*d2h) &
+            +16.d0*vtess(phi,flam-d2lam,h-d2h) &
+            -12.d0*vtess(phi,flam-d2lam,h) &
+            +3.d0*vtess(phi,flam,h-2.d0*d2h) &
+            -12.d0*vtess(phi,flam,h-d2h) &
+            +9.d0*v)/(4.d0*d2h*d2h)
+    elseif(((flam.ge.FlamW.and.flam-d2lam.lt.FlamW) &
+        .or.(flam.ge.FlamE.and.flam-d2lam.lt.FlamE)) &
+        .and.((h+d2h.lt.HB).or.(h-d2h.gt.HT) &
+        .or.(h-d2h.gt.HB.and.h+d2h.lt.HT))) then
+        ggLamH=(-vtess(phi,flam+2.d0*d2lam,h+d2h) &
+            +vtess(phi,flam+2.d0*d2lam,h-d2h) &
+            +4.d0*vtess(phi,flam+d2lam,h+d2h) &
+            -4.d0*vtess(phi,flam+d2lam,h-d2h) &
+            -3.d0*vtess(phi,flam,h+d2h) &
+            +3.d0*vtess(phi,flam,h-d2h))/(4.d0*d2h*d2h)
+    elseif(((flam.le.FlamW.and.flam+d2lam.lt.FlamW) &
+        .or.(flam.le.FlamE.and.flam+d2lam.lt.FlamE)) &
+        .and.((h+d2h.lt.HB).or.(h-d2h.gt.HT) &
+        .or.(h-d2h.gt.HB.and.h+d2h.lt.HT))) then
+        ggLamH=-(-vtess(phi,flam-2.d0*d2lam,h+d2h) &
+            +vtess(phi,flam-2.d0*d2lam,h-d2h) &
+            +4.d0*vtess(phi,flam-d2lam,h+d2h) &
+            -4.d0*vtess(phi,flam-d2lam,h-d2h) &
+            -3.d0*vtess(phi,flam,h+d2h) &
+            +3.d0*vtess(phi,flam,h-d2h))/(4.d0*d2h*d2h)
+    elseif(((h.ge.HB.and.h-d2h.lt.HB) &
+        .or.(h.ge.HT.and.h-d2h.lt.HT)) &
+        .and.((flam+d2lam.lt.FlamW).or.(flam-d2lam.gt.FlamE) &
+        .or.(flam-d2lam.gt.FlamW.and.flam+d2lam.lt.FlamE))) then
+        ggLamH=(-vtess(phi,flam+d2lam,h+2.d0*d2h) &
+            +vtess(phi,flam-d2lam,h+2.d0*d2h) &
+            +4.d0*vtess(phi,flam+d2lam,h+d2h) &
+            -4.d0*vtess(phi,flam-d2lam,h+d2h) &
+            -3.d0*vtess(phi,flam+d2lam,h) &
+            +3.d0*vtess(phi,flam-d2lam,h))/(4.d0*d2h*d2h)
+    elseif(((h.le.HB.and.h+d2h.gt.HB) &
+        .or.(h.le.HT.and.h+d2h.gt.HT)) &
+        .and.((flam+d2lam.lt.FlamW).or.(flam-d2lam.gt.FlamE) &
+        .or.(flam-d2lam.gt.FlamW.and.flam+d2lam.lt.FlamE))) then
+        ggLamH=(-vtess(phi,flam+d2lam,h-2.d0*d2h) &
+            +vtess(phi,flam-d2lam,h-2.d0*d2h) &
+            +4.d0*vtess(phi,flam+d2lam,h-d2h) &
+            -4.d0*vtess(phi,flam-d2lam,h-d2h) &
+            -3.d0*vtess(phi,flam+d2lam,h) &
+            +3.d0*vtess(phi,flam-d2lam,h))/(4.d0*d2h*d2h)
+    else
+        ggLamH=(vtess(phi,flam+d2lam,h+d2h) &
+            -vtess(phi,flam-d2lam,h+d2h) &
+            -vtess(phi,flam+d2lam,h-d2h) &
+            +vtess(phi,flam-d2lam,h-d2h))/(4.d0*d2h*d2h)
+    endif
+else
+    ggLamH=(vtess(phi,flam+d2lam,h+d2h) &
+        -vtess(phi,flam-d2lam,h+d2h) &
+        -vtess(phi,flam+d2lam,h-d2h) &
+        +vtess(phi,flam-d2lam,h-d2h))/(4.d0*d2h*d2h)
+endif
+ggLamH=ggLamH-gH/(r*r*c)
+!
+return; end
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+subroutine dqde(f,a,b,delta0,s)
+!
+!	The subroutine to compute a given integral by the double precision
+!    double exponential (DE) quadrature rule.
+!
+!    Reference: Fukushima (2017) Precise and fast computation of gravitational
+!      field of general finite body and its application to gravitational study
+!      of asteroid Eros. Astron J. in printing
+!
+!    Input function/variables:
+!      f(t): a function to be integrated 
+!      a: the lower end point of the integration interval
+!      b: the upper end point of the integration interval
+!      delta0: the relative error tolerance (typically 1d-15)
+!    Output variable:
+!      s: the definite integral, s=int_a^b f(t) dt
+!        (Note) "errd" is the latest relative error estimate o "s"
+!
+real*8 f,a,b,delta0,s
+integer MMAX
+real*8 SAFETY,TWOPI
+parameter (MMAX=1024,SAFETY=10.d0)
+parameter (TWOPI=6.2831853071795865d0)
+integer m
+real*8 delta,hmax,deltax,factor,deltah,h0,eph,emh,deltat,apb,bma,sr,h 
+real*8 sprev,srprev,t,ep,em,eppem,xw,xa,wg,fa,fb,fapfb,errt 
+real*8 errh,errd
+delta=max(1.d-16,min(0.01d0,delta0))
+if(delta.gt.1.d-4) then
+    hmax=2.75d0+(-log10(delta))*0.75d0
+elseif(delta.gt.1.d-6) then
+    hmax=3.75d0+(-log10(delta))*0.5d0
+elseif(delta.gt.1.d-10) then
+    hmax=5.25d0+(-log10(delta))*0.25d0
+else
+    hmax=6.5d0+(-log10(delta))*0.125d0
+endif
+deltax=SAFETY*delta
+factor=1.d0-log(deltax)
+deltah=sqrt(deltax)
+h0=hmax/factor
+eph=exp(h0)
+emh=1.d0/eph
+deltat=exp(-emh*factor)
+apb=a+b
+bma=b-a
+sr=f(apb*0.5d0)*(bma*0.25d0)
+s=sr*(2.d0*TWOPI)
+err=abs(s)*deltat
+h=2.d0*h0
+m=1
+1 continue
+    sprev=s
+    srprev=sr
+    t=h*0.5d0
+2 continue
+        em=exp(t)
+        ep=TWOPI*em
+        em=TWOPI/em
+3 continue
+            eppem=ep+em
+            xw=1.d0/(1.d0+exp(ep-em))
+            xa=bma*xw
+            wg=xa*(1.d0-xw)
+            fa=f(a+xa)*wg
+            fb=f(b-xa)*wg
+            fapfb=fa+fb
+            sr=sr+fapfb
+            s=s+fapfb*eppem
+            errt=(abs(fa)+abs(fb))*eppem
+            if(m.eq.1) err=err+errt*deltat
+            ep=ep*eph
+            em=em*emh
+            if(errt.gt.err.or.xw.gt.deltah) goto 3
+        t=t+h
+        if(t.lt.h0) goto 2
+    if(m.eq.1) then
+        errh=(err/deltat)*deltah*h0
+        errd=1.d0+2.d0*errh
+    else
+	    errd=h*(abs(s-2.d0*sprev)+4.d0*abs(sr-2.d0*srprev))
+    endif
+    h=h*0.5d0
+    m=m*2
+    if(errd.gt.errh.and.m.lt.MMAX) goto 1
+!if(errd.gt.errh) write(*,*)"(dqde) Required too many grids: >", MMAX
+s=s*h
+return;end
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+subroutine dqde1(f,a,b,delta0,s)
+!
+!    The first copy of "dqde" to be used in computing the internal
+!    line integral called by "dqde"
+!
+real*8 f,a,b,delta0,s
+integer MMAX
+real*8 SAFETY,TWOPI
+parameter (MMAX=1024,SAFETY=10.d0)
+parameter (TWOPI=6.2831853071795865d0)
+integer m
+real*8 delta,hmax,deltax,factor,deltah,h0,eph,emh,deltat,apb,bma,sr,h 
+real*8 sprev,srprev,t,ep,em,eppem,xw,xa,wg,fa,fb,fapfb,errt 
+real*8 errh,errd
+delta=max(1.d-16,min(0.01d0,delta0))
+if(delta.gt.1.d-4) then
+    hmax=2.75d0+(-log10(delta))*0.75d0
+elseif(delta.gt.1.d-6) then
+    hmax=3.75d0+(-log10(delta))*0.5d0
+elseif(delta.gt.1.d-10) then
+    hmax=5.25d0+(-log10(delta))*0.25d0
+else
+    hmax=6.5d0+(-log10(delta))*0.125d0
+endif
+deltax=SAFETY*delta
+factor=1.d0-log(deltax)
+deltah=sqrt(deltax)
+h0=hmax/factor
+eph=exp(h0)
+emh=1.d0/eph
+deltat=exp(-emh*factor)
+apb=a+b
+bma=b-a
+sr=f(apb*0.5d0)*(bma*0.25d0)
+s=sr*(2.d0*TWOPI)
+err=abs(s)*deltat
+h=2.d0*h0
+m=1
+1 continue
+    sprev=s
+    srprev=sr
+    t=h*0.5d0
+2 continue
+        em=exp(t)
+        ep=TWOPI*em
+        em=TWOPI/em
+3 continue
+            eppem=ep+em
+            xw=1.d0/(1.d0+exp(ep-em))
+            xa=bma*xw
+            wg=xa*(1.d0-xw)
+            fa=f(a+xa)*wg
+            fb=f(b-xa)*wg
+            fapfb=fa+fb
+            sr=sr+fapfb
+            s=s+fapfb*eppem
+            errt=(abs(fa)+abs(fb))*eppem
+            if(m.eq.1) err=err+errt*deltat
+            ep=ep*eph
+            em=em*emh
+            if(errt.gt.err.or.xw.gt.deltah) goto 3
+        t=t+h
+        if(t.lt.h0) goto 2
+    if(m.eq.1) then
+        errh=(err/deltat)*deltah*h0
+        errd=1.d0+2.d0*errh
+    else
+	    errd=h*(abs(s-2.d0*sprev)+4.d0*abs(sr-2.d0*srprev))
+    endif
+    h=h*0.5d0
+    m=m*2
+    if(errd.gt.errh.and.m.lt.MMAX) goto 1
+!if(errd.gt.errh) write(*,*)"(dqde1) Required too many grids: >", MMAX
+s=s*h
+return;end
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+real*8 function dlog1p(x0)
+!
+!    The double precision Fortran function to compute precisely log1p(x),
+!    a special logarithm function defined as log1p(x) = ln(1+x),
+!    by the (7,6) rational minimax approximation evaluated by Estrin's scheme
+!
+!    Reference: Fukushima (2017) Precise and fast computation of gravitational
+!      field of general finite body and its application to gravitational study
+!      of asteroid Eros. Astron J. in printing
+!
+real*8 x0,x1,x2,x4,a1,a2,a3,a4,a5,a6,a7,b1,b2,b3,b4,b5,b6
+parameter (a1=0.99999999999999999405d0,a2=2.45235728562912886048d0)
+parameter (a3=2.17053627298972253249d0,a4=0.83928994566440838378d0)
+parameter (a5=0.13520496594993836479d0,a6=0.00682631751459270270d0)
+parameter (a7=0.00002291289324181940d0)
+parameter (b1=2.95235728562912599232d0,b2=3.31338158247117791600d0)
+parameter (b3=1.76186164168333482938d0,b4=0.44976458082070468584d0)
+parameter (b5=0.04896199808811261680d0,b6=0.00157389087429218809d0)
+if(x0.lt.-0.5d0.or.x0.gt.1.d0) then
+    dlog1p=log(1.d0+x0)
+elseif(x0.lt.0.d0) then
+    x1=-x0/(1.d0+x0)
+    x2=x1*x1; x4=x2*x2
+    dlog1p=-x1*(((a1+x1*a2)+x2*(a3+x1*a4))+x4*((a5+x1*a6)+x2*a7)) &
+        /(((1.d0+x1*b1)+x2*(b2+x1*b3))+x4*((b4+x1*b5)+x2*b6))
+else
+    x1=x0
+    x2=x1*x1; x4=x2*x2
+    dlog1p=x1*(((a1+x1*a2)+x2*(a3+x1*a4))+x4*((a5+x1*a6)+x2*a7)) &
+        /(((1.d0+x1*b1)+x2*(b2+x1*b3))+x4*((b4+x1*b5)+x2*b6))
+endif
+return; end
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+!
+!    Output of "xtess"
+!      (Note) It took 7.69 sec at a PC with Intel Core i7-4600U running at 2.10 GHz
+!             even ater a full optimization of Fortran codes by the Intel Visual
+!             Fortran Composer XE 2011 update 8 (or the so-called ifort 12.1)
+!             with the compiler options as:
+!			/O3 /Qparallel /Qpar-threshold:10 /Qvec-threshold:10 /Qopt-prefetch=3
+!			/assume:buffered_io /Qipo /Qopt-matmul /libs:static /threads /c /QxHost
+!
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+       # delta=  1.0000000E-16
+    # R0,HT,HB=  6.3800000E+03  1.0000000E+01 -4.0000000E+01
+   # PhiN,PhiS=  2.8000000E+01  2.7000000E+01
+# LamdaE,LamdaW  8.7000000E+01  8.6000000E+01
+  # phi,lambda=  2.7500000E+01  8.6500000E+01
+            # H                        V
+              #                     gPhi                  gLambda                       gH
+              #              GammaPhiPhi           GammaPhiLambda                GammaPhiH
+              #        GammaLambdaLambda             GammaLambdaH                  GammaHH
+ -9.5000000E+01    1.522385430859932E-04
+                   0.000000000000000E+00    0.000000000000000E+00    1.564130608898578E-06
+                   2.488672408748733E-10    0.000000000000000E+00    0.000000000000000E+00
+                   2.488672408748733E-10   -4.464096014777559E-14    2.893259481144160E-08
+ -8.5000000E+01    1.694526871210555E-04
+                   0.000000000000000E+00    0.000000000000000E+00    1.892198142307468E-06
+                   3.005874729638551E-10    0.000000000000000E+00    0.000000000000000E+00
+                   3.005874729638551E-10   -5.383270698548453E-14    3.704016020364891E-08
+ -7.5000000E+01    1.903905934236350E-04
+                   0.000000000000000E+00    0.000000000000000E+00    2.312822513933105E-06
+                   3.668235549457740E-10    0.000000000000000E+00    0.000000000000000E+00
+                   3.668235549457740E-10   -6.559084116275961E-14    4.750836836462066E-08
+ -6.5000000E+01    2.161011857153642E-04
+                   0.000000000000000E+00    0.000000000000000E+00    2.851074036457655E-06
+                   4.514764903337537E-10    0.000000000000000E+00    0.000000000000000E+00
+                   4.514764903337537E-10   -8.059959535025348E-14    6.057039583336358E-08
+ -5.5000000E+01    2.478880058505530E-04
+                   0.000000000000000E+00    0.000000000000000E+00    3.531846611828729E-06
+                   5.583947212377438E-10    0.000000000000000E+00    0.000000000000000E+00
+                   5.583947212377438E-10   -9.952950639508237E-14    7.588192731877950E-08
+ -4.5000000E+01    2.872708844104648E-04
+                   0.000000000000000E+00    0.000000000000000E+00    4.371789329760953E-06
+                   6.901009202464015E-10    0.000000000000000E+00    0.000000000000000E+00
+                   6.901009202464015E-10   -1.228109422259893E-13    9.207514163080163E-08
+ -3.5000000E+01    3.319910086311147E-04
+                   0.000000000000000E+00    0.000000000000000E+00    3.825615688316111E-06
+                   6.029339146282286E-10    0.000000000000000E+00    0.000000000000000E+00
+                   6.029339146282286E-10   -1.071295209622250E-13   -2.015876840700058E-07
+ -2.5000000E+01    3.603747131612368E-04
+                   0.000000000000000E+00    0.000000000000000E+00    1.869421744025771E-06
+                   2.941654986665257E-10    0.000000000000000E+00    0.000000000000000E+00
+                   2.941654986665257E-10   -5.218518844808438E-14   -1.906499661380726E-07
+ -1.5000000E+01    3.696350462514114E-04
+                   0.000000000000000E+00    0.000000000000000E+00   -1.064260805927673E-08
+                  -1.672051541127530E-12    0.000000000000000E+00    0.000000000000000E+00
+                  -1.672051541127530E-12    2.961572225761545E-16   -1.866356621008308E-07
+ -5.0000000E+00    3.601669342163731E-04
+                   0.000000000000000E+00    0.000000000000000E+00   -1.889139936024408E-06
+                  -2.963356762391228E-10    0.000000000000000E+00    0.000000000000000E+00
+                  -2.963356762391228E-10    5.240525358500649E-14   -1.903142199554053E-07
+  5.0000000E+00    3.316111352803727E-04
+                   0.000000000000000E+00    0.000000000000000E+00   -3.839348173993404E-06
+                  -6.013074665612222E-10    0.000000000000000E+00    0.000000000000000E+00
+                  -6.013074665612222E-10    1.061712110128518E-13   -2.006684771688085E-07
+  1.5000000E+01    2.868101440205006E-04
+                   0.000000000000000E+00    0.000000000000000E+00   -4.374218164388472E-06
+                  -6.840059678480801E-10    0.000000000000000E+00    0.000000000000000E+00
+                  -6.840059678480801E-10    1.205842032370235E-13    9.300147090783754E-08
+  2.5000000E+01    2.474382990881564E-04
+                   0.000000000000000E+00    0.000000000000000E+00   -3.528159772641221E-06
+                  -5.508446171180672E-10    0.000000000000000E+00    0.000000000000000E+00
+                  -5.508446171180672E-10    9.695742027594247E-14    7.623710370309283E-08
+  3.5000000E+01    2.157004300813909E-04
+                   0.000000000000000E+00    0.000000000000000E+00   -2.845439875551469E-06
+                  -4.435603859004628E-10    0.000000000000000E+00    0.000000000000000E+00
+                  -4.435603859004628E-10    7.795198307236942E-14    6.064194020465002E-08
+  4.5000000E+01    1.900473207915234E-04
+                   0.000000000000000E+00    0.000000000000000E+00   -2.307151583258427E-06
+                  -3.590897405849691E-10    0.000000000000000E+00    0.000000000000000E+00
+                  -3.590897405849691E-10    6.300876122029764E-14    4.746358413013454E-08
+  5.5000000E+01    1.691630798625039E-04
+                   0.000000000000000E+00    0.000000000000000E+00   -1.887193033025766E-06
+                  -2.932700906022946E-10    0.000000000000000E+00    0.000000000000000E+00
+                  -2.932700906022946E-10    5.137955022546752E-14    3.696038720953256E-08
+  6.5000000E+01    1.519948957924415E-04
+                   0.000000000000000E+00    0.000000000000000E+00   -1.559945026069056E-06
+                  -2.420395695995433E-10    0.000000000000000E+00    0.000000000000000E+00
+                  -2.420395695995433E-10    4.233840825350266E-14    2.885169681223171E-08
+  7.5000000E+01    1.377280082166444E-04
+                   0.000000000000000E+00    0.000000000000000E+00   -1.303706863264856E-06
+                  -2.019685303276307E-10    0.000000000000000E+00    0.000000000000000E+00
+                  -2.019685303276307E-10    3.527431060054193E-14    2.267949631251105E-08
+  8.5000000E+01    1.257414395776617E-04
+                   0.000000000000000E+00    0.000000000000000E+00   -1.101402778726971E-06
+                  -1.703639255571494E-10    0.000000000000000E+00    0.000000000000000E+00
+                  -1.703639255571494E-10    2.970846311993994E-14    1.799575571025114E-08
+  9.5000000E+01    1.155637184360951E-04
+                   0.000000000000000E+00    0.000000000000000E+00   -9.400780632172199E-07
+                  -1.451858012690687E-10    0.000000000000000E+00    0.000000000000000E+00
+                  -1.451858012690687E-10    2.527874151228919E-14    1.442904816232757E-08
+  1.0500000E+02    1.068357959386216E-04
+                   0.000000000000000E+00    0.000000000000000E+00   -8.100601082187780E-07
+                  -1.249128925549388E-10    0.000000000000000E+00    0.000000000000000E+00
+                  -1.249128925549388E-10    2.171542636812539E-14    1.169332748275438E-08
+  1.1500000E+02    9.928233337092832E-05
+                   0.000000000000000E+00    0.000000000000000E+00   -7.041574277123671E-07
+                  -1.084153083467848E-10    0.000000000000000E+00    0.000000000000000E+00
+                  -1.084153083467848E-10    1.881839282434381E-14    9.575735896939903E-09
+  1.2500000E+02    9.269027708860814E-05
+                   0.000000000000000E+00    0.000000000000000E+00   -6.170099768266074E-07
+                  -9.485164901254535E-11    0.000000000000000E+00    0.000000000000000E+00
+                  -9.485164901254535E-11    1.643874507720927E-14    7.920162350839347E-09
+  1.3500000E+02    8.689312433613942E-05
+                   0.000000000000000E+00    0.000000000000000E+00   -5.445976435678865E-07
+                  -8.359134974180914E-11    0.000000000000000E+00    0.000000000000000E+00
+                  -8.359134974180914E-11    1.446498520538850E-14    6.612546700884383E-09
+  1.4500000E+02    8.175942046629851E-05
+                   0.000000000000000E+00    0.000000000000000E+00   -4.838801342757646E-07
+                  -7.415787498479151E-11    0.000000000000000E+00    0.000000000000000E+00
+                  -7.415787498479151E-11    1.281291179706131E-14    5.569327072645579E-09
+  1.5500000E+02    7.718433330381285E-05
+                   0.000000000000000E+00    0.000000000000000E+00   -4.325366577204661E-07
+                  -6.618770584857935E-11    0.000000000000000E+00    0.000000000000000E+00
+                  -6.618770584857935E-11    1.141833583445879E-14    4.728959738696030E-09
+  1.6500000E+02    7.308344678779011E-05
+                   0.000000000000000E+00    0.000000000000000E+00   -3.887784140609058E-07
+                  -5.940082720563877E-11    0.000000000000000E+00    0.000000000000000E+00
+                  -5.940082720563877E-11    1.023184418954381E-14    4.045730021411222E-09
+  1.7500000E+02    6.938815426986298E-05
+                   0.000000000000000E+00    0.000000000000000E+00   -3.512132394062391E-07
+                  -5.357944155701589E-11    0.000000000000000E+00    0.000000000000000E+00
+                  -5.357944155701589E-11    9.215025954929059E-15    3.485411979109969E-09
+  1.8500000E+02    6.604220927845390E-05
+                   0.000000000000000E+00    0.000000000000000E+00   -3.187473619604029E-07
+                  -4.855253038239192E-11    0.000000000000000E+00    0.000000000000000E+00
+                  -4.855253038239192E-11    8.337737429975360E-15    3.022127700543810E-09
+  1.9500000E+02    6.299911914505278E-05
+                   0.000000000000000E+00    0.000000000000000E+00   -2.905135869657135E-07
+                  -4.418457596436707E-11    0.000000000000000E+00    0.000000000000000E+00
+                  -4.418457596436707E-11    7.576105440634516E-15    2.636124122239184E-09
+  2.0500000E+02    6.022015719417069E-05
+                   0.000000000000000E+00    0.000000000000000E+00   -2.658183543989876E-07
+                  -4.036725199680905E-11    0.000000000000000E+00    0.000000000000000E+00
+                  -4.036725199680905E-11    6.911057121610757E-15    2.312197568132296E-09
+  2.1500000E+02    5.767283276742131E-05
+                   0.000000000000000E+00    0.000000000000000E+00   -2.441023741350494E-07
+                  -3.701324854208482E-11    0.000000000000000E+00    0.000000000000000E+00
+                  -3.701324854208482E-11    6.327227930435693E-15    2.038536126255646E-09
+  2.2500000E+02    5.532970311618965E-05
+                   0.000000000000000E+00    0.000000000000000E+00   -2.249110992991893E-07
+                  -3.405164258882502E-11    0.000000000000000E+00    0.000000000000000E+00
+                  -3.405164258882502E-11    5.812143393760244E-15    1.805888643106272E-09
+  2.3500000E+02    5.316744283951858E-05
+                   0.000000000000000E+00    0.000000000000000E+00   -2.078723716149099E-07
+                  -3.142439480195161E-11    0.000000000000000E+00    0.000000000000000E+00
+                  -3.142439480195161E-11    5.355600210267690E-15    1.606946433557743E-09
+  2.4500000E+02    5.116610904202790E-05
+                   0.000000000000000E+00    0.000000000000000E+00   -1.926793662886024E-07
+                  -2.908367793035508E-11    0.000000000000000E+00    0.000000000000000E+00
+                  -2.908367793035508E-11    4.949194482589794E-15    1.435880398535937E-09
+  2.5500000E+02    4.930855649651253E-05
+                   0.000000000000000E+00    0.000000000000000E+00   -1.790774573945117E-07
+                  -2.698982025538986E-11    0.000000000000000E+00    0.000000000000000E+00
+                  -2.698982025538986E-11    4.585958719682602E-15    1.288030331150842E-09
+  2.6500000E+02    4.757996872078616E-05
+                   0.000000000000000E+00    0.000000000000000E+00   -1.668540276783255E-07
+                  -2.510971071156141E-11    0.000000000000000E+00    0.000000000000000E+00
+                  -2.510971071156141E-11    4.260080443529082E-15    1.159621493447007E-09
+  2.7500000E+02    4.596747933454624E-05
+                   0.000000000000000E+00    0.000000000000000E+00   -1.558305006502802E-07
+                  -2.341555231409169E-11    0.000000000000000E+00    0.000000000000000E+00
+                  -2.341555231409169E-11    3.966682337312003E-15    1.047588803707748E-09
+  2.8500000E+02    4.445986426369507E-05
+                   0.000000000000000E+00    0.000000000000000E+00   -1.458560633820413E-07
+                  -2.188388047742555E-11    0.000000000000000E+00    0.000000000000000E+00
+                  -2.188388047742555E-11    3.701649178939288E-15    9.494264761434548E-10
+  2.9500000E+02    4.304728994459756E-05
+                   0.000000000000000E+00    0.000000000000000E+00   -1.368026879008472E-07
+                  -2.049478470424677E-11    0.000000000000000E+00    0.000000000000000E+00
+                  -2.049478470424677E-11    3.461490678723635E-15    8.630634503472928E-10
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
