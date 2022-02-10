@@ -1,5 +1,8 @@
 # xtess-xqtess
 
+[![DOI](https://zenodo.org/badge/457617415.svg)](https://zenodo.org/badge/latestdoi/457617415)
+
+
 `xtess.f90` and `xqtess.f90` are the revised Fortran codes in double and quadruple precision based on the original Fortran codes `xtess.txt` and `xqtess.txt` (Fukushima 2018). 
 
 They can accurately compute the gravitational field (i.e. gravitational potential, gravitational acceleration vector, and gravity gradient tensor) of a tesseroid both in double and quadruple precision no matter the computation point is located outside, near the surface of, on the surface of, or inside the tesseroid.
