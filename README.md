@@ -52,3 +52,4 @@ Regarding the installation of the `ifort`, please refer to the Intel® oneAPI Ba
 # Reference
 
 - Fukushima T (2018) Accurate computation of gravitational field of a tesseroid. Journal of Geodesy 92(12):1371–1386, https://doi.org/10.1007/s00190-018-1126-2
+- Deng XL (2023) Corrections to: “Accurate computation of gravitational field of a tesseroid” by Fukushima (2018) in J. Geod. 92(12):1371–1386. Journal of Geodesy 97(1):8, 1-7. https://doi.org/10.1007/s00190-022-01673-2 
